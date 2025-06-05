@@ -1,0 +1,166 @@
+services:
+  # WebSocket Server Instance 1
+  ws-server-1:
+    build:
+      context: ./server
+      dockerfile: ../Dockerfile
+    container_name: scalable-ws-server-1
+    # ports:
+    #   - "8081:8080"
+    environment:
+      - PORT=8080
+      - SERVER_ID=server-1
+      - REDIS_ADDR=redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - ws-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - rabbitmq
+
+  # WebSocket Server Instance 2
+  ws-server-2:
+    build:
+      context: ./server
+      dockerfile: ../Dockerfile
+    container_name: scalable-ws-server-2
+    # ports:
+    #   - "8082:8080"
+    environment:
+      - PORT=8080
+      - SERVER_ID=server-2
+      - REDIS_ADDR=redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - ws-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - rabbitmq
+
+  ws-server-3:
+    build:
+      context: ./server
+      dockerfile: ../Dockerfile
+    container_name: scalable-ws-server-3
+    # ports:
+    #   - "8082:8080"
+    environment:
+      - PORT=8080
+      - SERVER_ID=server-3
+      - REDIS_ADDR=redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - ws-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - rabbitmq
+
+  ws-server-4:
+    build:
+      context: ./server
+      dockerfile: ../Dockerfile
+    container_name: scalable-ws-server-4
+    # ports:
+    #   - "8082:8080"
+    environment:
+      - PORT=8080
+      - SERVER_ID=server-4
+      - REDIS_ADDR=redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - ws-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - rabbitmq
+
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: scalable-ws-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # for logs
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - ws-server-1
+      - ws-server-2
+      - ws-server-3
+      - ws-server-4
+    networks:
+      - ws-network
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # Redis Service
+  redis:
+    image: redis:7-alpine
+    container_name: scalable-ws-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ws-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Redis Insight - Redis GUI
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: scalable-ws-redis-insight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis_insight_data:/db
+    networks:
+      - ws-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  # RabbitMQ Service
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: scalable-ws-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP protocol port
+      - "15672:15672" # Management UI port
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - ws-network
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+
+
+  # k6:
+  #   image: grafana/k6 # Use the official k6 image
+  #   container_name: k6_websocket_tester
+  #   volumes:
+  #     - ./k6:/k6 # Mount your local 'scripts' directory to '/scripts' in the container
+  #   command: run /k6/websocket-test.js # Command to execute k6
+  #   networks:
+  #     - ws-network
+  #   restart: unless-stopped
+
+
+volumes:
+  redis_data:
+  rabbitmq_data:
+  redis_insight_data:
+
+networks:
+  ws-network:
+    driver: bridge

@@ -1,0 +1,55 @@
+graph TD
+    subgraph "User Tier"
+        U1[User 1]
+        U2[User 2]
+        U...[User ...]
+        UN[User 10,000]
+    end
+    subgraph "Load Balancing Tier"
+        Nginx["NGINX Load Balancer
+        (Sticky Sessions - e.g., ip_hash)"]
+    end
+    subgraph "Application Tier (Golang WebSocket Servers - Horizontally Scaled)"
+        WS1[Go WebSocket Server 1]
+        WS2[Go WebSocket Server 2]
+        WSN[Go WebSocket Server N]
+    end
+    subgraph "Backplane & State Management Tier"
+        RabbitMQ["RabbitMQ
+        (Message Brokering for inter-server communication)"]
+        Redis["Redis
+        (Pub/Sub for real-time updates,
+        Cache for session/user data if needed,
+        Presence tracking)"]
+    end
+    subgraph "Data Persistence Tier"
+        DB[("Database
+        e.g., PostgreSQL, MongoDB")]
+    end
+    U1 --> Nginx
+    U2 --> Nginx
+    U... --> Nginx
+    UN --> Nginx
+    Nginx --> WS1
+    Nginx --> WS2
+    Nginx --> WSN
+    WS1 <--> RabbitMQ
+    WS2 <--> RabbitMQ
+    WSN <--> RabbitMQ
+    WS1 <--> Redis
+    WS2 <--> Redis
+    WSN <--> Redis
+    WS1 --> DB
+    WS2 --> DB
+    WSN --> DB
+    %% Styling
+    classDef user fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef loadbalancer fill:#ccf,stroke:#333,stroke-width:2px;
+    classDef appserver fill:#cfc,stroke:#333,stroke-width:2px;
+    classDef backplane fill:#fcf,stroke:#333,stroke-width:2px;
+    classDef database fill:#ff9,stroke:#333,stroke-width:2px;
+    class U1,U2,U...,UN user;
+    class Nginx loadbalancer;
+    class WS1,WS2,WSN appserver;
+    class RabbitMQ,Redis backplane;
+    class DB database;
