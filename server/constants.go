@@ -23,6 +23,7 @@ var (
 
 	// Redis settings
 	redisAddr = getEnvOrDefault("REDIS_ADDR", "localhost:6379")
+	SERVER_ID = getEnvOrDefault("SERVER_ID", "server-1")
 )
 
 // getEnvOrDefault returns the value of an environment variable or a default value if not set

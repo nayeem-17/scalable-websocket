@@ -13,14 +13,12 @@ import (
 func main() {
 	log.Printf("Starting WebSocket server instance: %s\n", serverID)
 
-	// Connect to RabbitMQ
 	if err := manager.connectRabbitMQ(rabbitMQURI); err != nil {
 		log.Fatalf("Failed to initialize RabbitMQ: %v. Server cannot start.", err)
 	}
-	// Connect to Redis
+
 	if err := manager.connectRedis(redisAddr); err != nil {
 		log.Fatalf("Failed to initialize Redis: %v. Server functions relying on Redis may fail.", err)
-		// Depending on Redis's criticality, you might choose to start without it or with degraded functionality.
 	}
 
 

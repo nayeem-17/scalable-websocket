@@ -20,7 +20,7 @@ export const options = {
     { duration: '2s', target: 1000 },  // Ramp up to 1000 connections over 2 seconds (adjust higher if needed)
     { duration: '1m', target: 1000 },  // Stay at 1000 connections for 1 minute
     // Add more stages if you expect to handle more connections
-    { duration: '2s', target: 0 },     // Ramp down gracefully
+    { duration: '25s', target: 0 },     // Ramp down gracefully
   ],
   thresholds: {
     'ws_connecting': ['p(95)<2500'],     // 95% of connections should establish in < 2.5s (allow more time under stress)
