@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -21,14 +22,39 @@ func main() {
 		log.Fatalf("Failed to initialize Redis: %v. Server functions relying on Redis may fail.", err)
 	}
 
-
 	go manager.run()
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWsWithBackplane(&manager, w, r)
 	})
 
-	srv := &http.Server{ Addr: ":8080", Handler: nil }
+	http.HandleFunc("/_health", func(w http.ResponseWriter, r *http.Request) {
+		res := healthCheck()
+		w.Header().Set("Content-Type", "application/json")
+
+		if res.IsOK {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+
+		jsonData, err := res.ToJSON()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error": "Failed to marshal response"}`))
+			return
+		}
+
+		w.Write(jsonData)
+	})
+
+	// Fix: Ensure PORT has proper format
+	addr := PORT
+	if PORT[0] != ':' && PORT != "localhost:8080" {
+		addr = ":" + PORT
+	}
+
+	srv := &http.Server{Addr: addr, Handler: nil}
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -47,8 +73,8 @@ func main() {
 		log.Println("Server gracefully stopped")
 	}()
 
-	log.Println("HTTP server starting on :8080")
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	log.Printf("HTTP server starting on %s\n", addr)
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("ListenAndServe error: %v", err)
 	}
 	log.Println("Server exiting")

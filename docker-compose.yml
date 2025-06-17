@@ -129,7 +129,15 @@ services:
       - ws-network
     restart: unless-stopped
     command: redis-server --appendonly yes
-
+    labels:
+      # Coroot annotations for metric collection
+      - "coroot.com/redis-scrape=true"
+      - "coroot.com/redis-scrape-port=6379"
+      # Optional: specify credentials if Redis has authentication
+      # - "coroot.com/redis-scrape-credentials-password=<PASSWORD>"
+      # Optional: use secret for credentials
+      # - "coroot.com/redis-scrape-credentials-secret-name=redis-secret"
+      # - "coroot.com/redis-scrape-credentials-secret-password-key=password"
   # Redis Insight - Redis GUI
   redis-insight:
     image: redislabs/redisinsight:latest

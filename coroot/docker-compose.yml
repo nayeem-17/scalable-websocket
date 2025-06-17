@@ -25,6 +25,7 @@ services:
       - '--bootstrap-clickhouse-address=clickhouse:9000'
     environment:
       - LICENSE_KEY=${LICENSE_KEY:-}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-admin123}
     # depends_on:
     #   - clickhouse
     #   - prometheus

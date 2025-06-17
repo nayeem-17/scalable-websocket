@@ -11,16 +11,16 @@ export const options = {
   // Adjust these target numbers and durations based on your server's expected capacity
   // and how long you want to observe it at each level.
   stages: [
-    { duration: '2s', target: 50 },    // Ramp up to 50 connections over 2 seconds
-    { duration: '1m', target: 50 },    // Stay at 50 connections for 1 minute
-    { duration: '2s', target: 200 },   // Ramp up to 200 connections over 2 seconds
-    { duration: '1m', target: 200 },   // Stay at 200 connections for 1 minute
-    { duration: '2s', target: 500 },   // Ramp up to 500 connections over 2 seconds
-    { duration: '1m', target: 500 },   // Stay at 500 connections for 1 minute
-    { duration: '2s', target: 1000 },  // Ramp up to 1000 connections over 2 seconds (adjust higher if needed)
-    { duration: '1m', target: 1000 },  // Stay at 1000 connections for 1 minute
+    { duration: '10s', target: 150 },    // Ramp up to 50 connections over 1 minute
+    { duration: '1m', target: 150 },    // Stay at 50 connections for 2 minutes
+    { duration: '10s', target: 1200 },   // Ramp up to 200 connections over 1 minute
+    { duration: '1m', target: 1200 },   // Stay at 200 connections for 1 minute
+    // { duration: '10s', target: 1500 },   // Ramp up to 500 connections over 1 minute
+    // { duration: '1m', target: 1500 },   // Stay at 500 connections for 2 minutes
+    // { duration: '10s', target: 3000 },  // Ramp up to 1000 connections over 1 minute
+    // { duration: '1m', target: 3000 },  // Stay at 1000 connections for 2 minutes
     // Add more stages if you expect to handle more connections
-    { duration: '25s', target: 0 },     // Ramp down gracefully
+    { duration: '1m', target: 0 },     // Ramp down gracefully
   ],
   thresholds: {
     'ws_connecting': ['p(95)<2500'],     // 95% of connections should establish in < 2.5s (allow more time under stress)

@@ -21,24 +21,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func serveWsEnhanced(m *Manager, w http.ResponseWriter, r *http.Request) {
-	log.Println("New connection attempt from:", r.RemoteAddr)
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Failed to upgrade connection for %s: %v\n", r.RemoteAddr, err)
-		return
-	}
-
-	client := &Client{conn: conn, id: conn.RemoteAddr().String()} // Use remote addr as ID for now
-	m.register <- client                                          // Send to register channel
-
-	// Start the read and write loops for this client in separate goroutines.
-	// The writeLoop is mostly for pings in this broadcast model.
-	go client.writeLoop(m)
-	go client.readLoop(m)
-}
 func serveWsWithBackplane(m *Manager, w http.ResponseWriter, r *http.Request) {
-	// ... (Same as serveWsEnhanced)
 	log.Println("New connection attempt from:", r.RemoteAddr)
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -46,7 +29,7 @@ func serveWsWithBackplane(m *Manager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &Client{conn: conn, id: conn.RemoteAddr().String() + "-" + serverID} // Make client ID more unique across servers
+	client := &Client{conn: conn, id: conn.RemoteAddr().String() + "-" + serverID}
 	m.register <- client
 
 	go client.writeLoop(m)
@@ -65,13 +48,9 @@ type Manager struct {
 	register     chan *Client
 	unregister   chan *Client
 	shutdownChan chan struct{}
-
-	// RabbitMQ components
-	amqpConn    *amqp.Connection
-	amqpChannel *amqp.Channel
-
-	// Redis component
-	redisClient *redis.Client
+	amqpConn     *amqp.Connection
+	amqpChannel  *amqp.Channel
+	redisClient  *redis.Client
 }
 
 type Message struct {
@@ -82,7 +61,7 @@ type Message struct {
 
 var manager = Manager{
 	clients:      make(map[*Client]bool),
-	broadcast:    make(chan []byte),
+	broadcast:    make(chan []byte, broadcastMessageSize),
 	register:     make(chan *Client),
 	unregister:   make(chan *Client),
 	shutdownChan: make(chan struct{}),
@@ -92,7 +71,11 @@ func (m *Manager) unregisterClient(client *Client) {
 	m.clientsMu.Lock()
 	if _, ok := m.clients[client]; ok {
 		delete(m.clients, client)
-		client.conn.Close()
+		err := client.conn.Close()
+		if err != nil {
+			log.Println("Error occurred while closing the client websocket connection.")
+			return
+		}
 	}
 	m.clientsMu.Unlock()
 }
@@ -101,19 +84,35 @@ func (m *Manager) unregisterClient(client *Client) {
 func (m *Manager) run() {
 	log.Println("Client Manager started")
 	defer func() {
+		var errors []error
+
 		if m.amqpChannel != nil {
-			m.amqpChannel.Close()
+			if err := m.amqpChannel.Close(); err != nil {
+				errors = append(errors, fmt.Errorf("failed to close AMQP channel: %w", err))
+			}
 		}
+
 		if m.amqpConn != nil {
-			m.amqpConn.Close()
+			if err := m.amqpConn.Close(); err != nil {
+				errors = append(errors, fmt.Errorf("failed to close AMQP connection: %w", err))
+			}
 		}
+
 		if m.redisClient != nil {
-			m.redisClient.Close()
+			if err := m.redisClient.Close(); err != nil {
+				errors = append(errors, fmt.Errorf("failed to close Redis client: %w", err))
+			}
 		}
-		log.Println("Client Manager stopped and resources released")
+
+		if len(errors) > 0 {
+			for _, err := range errors {
+				log.Printf("Error during cleanup: %v", err)
+			}
+		} else {
+			log.Println("Client Manager stopped and resources released successfully")
+		}
 	}()
 
-	// Start RabbitMQ consumer in its own goroutine
 	if m.amqpChannel != nil {
 		go m.consumeFromRabbitMQ()
 	} else {
@@ -146,20 +145,24 @@ func (m *Manager) run() {
 			m.setUserPresence(client.id, serverID) // Set presence in Redis
 			log.Printf("Client %s registered on %s. Total local clients: %d\n", client.id, serverID, len(m.clients))
 
-			joinMsg := Message{Type: "user_join", Sender: client.id, Payload: fmt.Sprintf("User %s joined server %s", client.id, serverID)}
+			joinMsg := Message{Type: "user_join", Sender: serverID, Payload: fmt.Sprintf("User %s joined server %s", client.id, serverID)}
+			localJoinMsg := Message{Type: "local user_join", Sender: serverID, Payload: fmt.Sprintf("User %s joined server %s", client.id, serverID)}
 			joinMsgJSON, _ := json.Marshal(joinMsg)
+			localJoinMsgJSON, _ := json.Marshal(localJoinMsg)
+
 			// Publish join message to RabbitMQ for other servers
 			if err := m.publishToRabbitMQ(broadcastExchange, "", joinMsgJSON); err != nil {
 				log.Printf("Failed to publish join message to RabbitMQ: %v\n", err)
 			}
 			// Also broadcast locally (RabbitMQ will also send it back if no-local is false, but direct is faster for local)
 			select {
-			case m.broadcast <- joinMsgJSON:
+			case m.broadcast <- localJoinMsgJSON:
 			default:
 				log.Println("Local broadcast channel full. Dropping user_join message.")
 			}
 
 		case client := <-m.unregister:
+			log.Println("Broadcasting message............................")
 			m.clientsMu.Lock()
 			if _, ok := m.clients[client]; ok {
 				delete(m.clients, client)
@@ -167,7 +170,7 @@ func (m *Manager) run() {
 				m.removeUserPresence(client.id, serverID) // Remove from Redis
 				log.Printf("Client %s unregistered from %s. Total local clients: %d\n", client.id, serverID, len(m.clients))
 
-				leaveMsg := Message{Type: "user_leave", Sender: client.id, Payload: fmt.Sprintf("User %s left server %s", client.id, serverID)}
+				leaveMsg := Message{Type: "user_leave", Sender: serverID, Payload: fmt.Sprintf("User %s left server %s", client.id, serverID)}
 				leaveMsgJSON, _ := json.Marshal(leaveMsg)
 				if err := m.publishToRabbitMQ(broadcastExchange, "", leaveMsgJSON); err != nil {
 					log.Printf("Failed to publish leave message to RabbitMQ: %v\n", err)
@@ -230,7 +233,7 @@ func (c *Client) readLoop(m *Manager) {
 			// log.Printf("Raw message from client %s on %s: %s\n", c.id, serverID, string(p))
 			var receivedMsg Message
 			if err := json.Unmarshal(p, &receivedMsg); err == nil {
-				receivedMsg.Sender = c.id // Client's ID
+				receivedMsg.Sender = serverID
 
 				finalMsgJSON, err := json.Marshal(receivedMsg)
 				if err != nil {

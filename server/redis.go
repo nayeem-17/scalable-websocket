@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/go-redis/redis/v8" // Redis client
 )
 
 var (
 	ctx      = context.Background()                            // Context for Redis
-	serverID = fmt.Sprintf("server-%d", time.Now().UnixNano()) // Unique ID for this server instance
 )
 
 // --- Redis Helper Functions ---
