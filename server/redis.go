@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	ctx      = context.Background()                            // Context for Redis
+	ctx = context.Background() // Context for Redis
 )
 
 // --- Redis Helper Functions ---
@@ -88,10 +88,7 @@ func (m *Manager) subscribeToRedisChannel(channelName string) {
 				return
 			}
 			log.Printf("Received from Redis Pub/Sub channel '%s': %s\n", msg.Channel, msg.Payload)
-			// Example: Forward to local broadcast, similar to RabbitMQ messages
-			// m.broadcast <- []byte(msg.Payload)
+			m.broadcast <- []byte(msg.Payload)
 		}
 	}
 }
-
-// --- End Redis Helper Functions ---

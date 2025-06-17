@@ -22,14 +22,38 @@ var upgrader = websocket.Upgrader{
 }
 
 func serveWsWithBackplane(m *Manager, w http.ResponseWriter, r *http.Request) {
-	log.Println("New connection attempt from:", r.RemoteAddr)
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Failed to upgrade connection for %s: %v\n", r.RemoteAddr, err)
+	// --- Step 1: Extract Client ID from URL Query ---
+	// This allows connecting with ws://.../ws?id=YOUR_CLIENT_ID
+	clientIDs, ok := r.URL.Query()["id"]
+
+	// --- Step 2: Validate the ID ---
+	if !ok || len(clientIDs[0]) < 1 {
+		log.Println("URL Parameter 'id' is missing")
+		// Optionally send an HTTP error back to the client before upgrading
+		http.Error(w, "URL Parameter 'id' is missing", http.StatusBadRequest)
 		return
 	}
 
-	client := &Client{conn: conn, id: conn.RemoteAddr().String() + "-" + serverID}
+	clientID := clientIDs[0]
+	log.Printf("New connection attempt from client ID: %s (Remote Addr: %s)\n", clientID, r.RemoteAddr)
+
+	// --- Step 3: Upgrade the connection to a WebSocket ---
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("Failed to upgrade connection for %s: %v\n", clientID, err)
+		return
+	}
+
+	// --- Step 4: Create the Client struct using the provided ID ---
+	// The old line is commented out for comparison.
+	// client := &Client{conn: conn, id: conn.RemoteAddr().String() + "-" + serverID}
+	client := &Client{
+		conn: conn,
+		id:   clientID, // Use the ID from the query parameter
+	}
+
+	// --- Step 5: Register the client and start its goroutines ---
+	// This part remains the same.
 	m.register <- client
 
 	go client.writeLoop(m)
@@ -120,9 +144,9 @@ func (m *Manager) run() {
 	}
 
 	// Example: Optional Redis Pub/Sub listener
-	// if m.redisClient != nil {
-	//    go m.subscribeToRedisChannel("some_realtime_updates")
-	// }
+	if m.redisClient != nil {
+		go m.subscribeToRedisChannel("some_realtime_updates")
+	}
 
 	for {
 		select {
@@ -145,20 +169,37 @@ func (m *Manager) run() {
 			m.setUserPresence(client.id, serverID) // Set presence in Redis
 			log.Printf("Client %s registered on %s. Total local clients: %d\n", client.id, serverID, len(m.clients))
 
-			joinMsg := Message{Type: "user_join", Sender: serverID, Payload: fmt.Sprintf("User %s joined server %s", client.id, serverID)}
-			localJoinMsg := Message{Type: "local user_join", Sender: serverID, Payload: fmt.Sprintf("User %s joined server %s", client.id, serverID)}
-			joinMsgJSON, _ := json.Marshal(joinMsg)
-			localJoinMsgJSON, _ := json.Marshal(localJoinMsg)
+			session, err := m.getSession(client.id)
+			if err != nil {
+				log.Printf("Error retrieving session for %s: %v\n", client.id, err)
+			}
+			var joinMsgJSON []byte
 
-			// Publish join message to RabbitMQ for other servers
+			if session == nil {
+				// User has no previous session, create a default one.
+				log.Printf("No session found for %s. Creating default.\n", client.id)
+				defaultSession := &Session{
+					Nickname:    fmt.Sprintf("%s-%d", client.id, time.Now().UnixMilli()%10000),
+					Status:      "Online",
+					CurrentRoom: "general",
+				}
+				err := m.saveSession(client.id, defaultSession)
+				if err != nil {
+					log.Println("cannot save the session", err)
+				}
+				joinMsg := Message{Type: "user_join", Sender: defaultSession.Nickname, Payload: "A new user has joined."}
+				joinMsgJSON, _ = json.Marshal(joinMsg)
+
+			} else {
+				// User reconnected, their session was found!
+				log.Printf("Found session for %s. Nickname: %s, Status: %s\n", client.id, session.Nickname, session.Status)
+				session.Status = "Online" // Update status on reconnect
+				m.saveSession(client.id, session)
+				joinMsg := Message{Type: "user_reconnected", Sender: session.Nickname, Payload: "User has reconnected."}
+				joinMsgJSON, _ = json.Marshal(joinMsg)
+			}
 			if err := m.publishToRabbitMQ(broadcastExchange, "", joinMsgJSON); err != nil {
 				log.Printf("Failed to publish join message to RabbitMQ: %v\n", err)
-			}
-			// Also broadcast locally (RabbitMQ will also send it back if no-local is false, but direct is faster for local)
-			select {
-			case m.broadcast <- localJoinMsgJSON:
-			default:
-				log.Println("Local broadcast channel full. Dropping user_join message.")
 			}
 
 		case client := <-m.unregister:
@@ -227,11 +268,25 @@ func (c *Client) readLoop(m *Manager) {
 			}
 			break
 		}
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		var receivedMsg Message
 
-		if messageType == websocket.TextMessage {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		if receivedMsg.Type == "set_status" {
+			session, err := m.getSession(c.id)
+			if err == nil && session != nil {
+				session.Status = receivedMsg.Payload // e.g., "Away", "Busy"
+				if err := m.saveSession(c.id, session); err != nil {
+					log.Printf("Failed to save session for status update: %v\n", err)
+				} else {
+					log.Printf("Updated status for %s to %s\n", session.Nickname, session.Status)
+					// Now publish this status change to RabbitMQ so other users see it
+					statusUpdateMsg := Message{Type: "status_update", Sender: session.Nickname, Payload: session.Status}
+					statusUpdateJSON, _ := json.Marshal(statusUpdateMsg)
+					m.publishToRabbitMQ(broadcastExchange, "", statusUpdateJSON)
+				}
+			}
+		} else if messageType == websocket.TextMessage {
 			// log.Printf("Raw message from client %s on %s: %s\n", c.id, serverID, string(p))
-			var receivedMsg Message
 			if err := json.Unmarshal(p, &receivedMsg); err == nil {
 				receivedMsg.Sender = serverID
 
