@@ -329,7 +329,7 @@ func (c *Client) writeLoop(m *Manager) {
 				return
 			}
 		case <-m.shutdownChan: // Listen for manager shutdown
-			// log.Printf("Client %s writeLoop shutting down due to manager signal on %s.\n", c.id, serverID)
+			log.Printf("Client %s writeLoop shutting down due to manager signal on %s.\n", c.id, serverID)
 			return
 		}
 	}
